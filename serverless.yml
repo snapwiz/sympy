@@ -1,0 +1,86 @@
+
+service: edu # NOTE: update this with your service name
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+
+provider:
+  name: aws
+  role: eduLambdaRole
+  runtime: python3.6
+  timeout: 30
+  stage: ${opt:stage, self:custom.defaultStage}
+  profile: ${self:custom.profiles.${self:provider.stage}}
+  region: us-west-2
+  cfLogs: true # < sls v1.10
+  versionFunctions: false
+  environment:
+    NAME: ${file(./${self:provider.stage}.env.json):NAME}
+custom:
+  defaultStage: dev
+  profiles:
+    local: eduDev
+    dev: eduDev
+    prod: eduProd
+# you can add packaging information here
+package:
+  include:
+    - checks.py
+    - packages/latex2sympy/**
+    - packages/sympy/**
+    - packages/mpmath/**
+  exclude:
+
+functions:
+  evaluate:
+    handler: handler.handle
+    name: evaluate-${self:provider.stage}
+    description: Evaluate LaTex
+    events:
+      - http:
+          path: /evaluate
+          method: POST
+plugins:
+resources:
+  Resources:
+    eduLambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: eduLambdaRole-${self:provider.stage}
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        Policies:
+          - PolicyName: eduLogPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource:
+                    - "Fn::Join":
+                      - ":"
+                      -
+                        - "arn:aws:logs"
+                        - Ref: "AWS::Region"
+                        - Ref: "AWS::AccountId"
+                        - "log-group:/aws/lambda/*:*:*"
+                - Effect: "Allow"
+                  Action:
+                    - "s3:PutObject"
+                  Resource:
+                     Fn::Join:
+                      - ""
+                      - - "arn:aws:s3:::"
+                        - "Ref" : "ServerlessDeploymentBucket"
