@@ -27,9 +27,9 @@ custom:
 package:
   include:
     - checks.py
-    - packages/latex2sympy/**
-    - packages/sympy/**
-    - packages/mpmath/**
+    - latex2sympy/**
+    - sympy/**
+    - mpmath/**
   exclude:
 
 functions:
