@@ -751,7 +751,16 @@ def evalf_pow(v, prec, options):
         return finalize_complex(re, im, target_prec)
     # negative ** real
     elif mpf_lt(xre, fzero):
-        re, im = libmp.mpc_pow_mpf((xre, fzero), yre, target_prec)
+        result_sign = None
+        numer, denom = exp.as_numer_denom()
+        # (pi/3).is_Rational == False
+        if exp.is_Rational and denom.is_odd:
+            result_sign = 1 if numer.is_odd else 0
+            re, im = libmp.mpc_pow_mpf((libmp.mpf_abs(xre), fzero), yre, target_prec)
+            if result_sign != re[0]:
+                re, im = libmp.mpc_neg((re, im))
+        else:
+            re, im = libmp.mpc_pow_mpf((xre, fzero), yre, target_prec)
         return finalize_complex(re, im, target_prec)
     # positive ** real
     else:

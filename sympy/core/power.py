@@ -269,6 +269,17 @@ class Pow(Expr):
                 if abs(e).is_infinite:
                     return S.NaN
                 return S.One
+            elif e.is_rational and e.is_real and b is S.NegativeOne:
+                from sympy import numer, denom
+                n, d = numer(e), denom(e)
+                if d.is_odd:
+                    sign = 1 if n.is_even else -1
+                    obj = Expr.__new__(cls, -1*b, e)
+                    obj = cls._exec_constructor_postprocessors(obj)
+                    if not isinstance(obj, Pow):
+                        return sign*obj
+                    obj.is_commutative = (b.is_commutative and e.is_commutative)
+                    return sign*obj
             else:
                 # recognize base as E
                 if not e.is_Atom and b is not S.Exp1 and not isinstance(b, exp_polar):
@@ -378,6 +389,8 @@ class Pow(Expr):
                         s = sign(s)
                     else:
                         s = None
+                elif other.is_Rational and other.as_numer_denom()[1].is_odd:
+                    s = 1
             else:
                 # e.is_real is False requires:
                 #     _half(other) with constant floor or
@@ -1153,14 +1166,20 @@ class Pow(Expr):
         return self * (dexp * log(self.base) + dbase * self.exp/self.base)
 
     def _eval_evalf(self, prec):
-        base, exp = self.as_base_exp()
-        base = base._evalf(prec)
-        if not exp.is_Integer:
-            exp = exp._evalf(prec)
+        _base, _exp = self.as_base_exp()
+        base = _base._evalf(prec)
+        if not _exp.is_Integer:
+            exp = _exp._evalf(prec)
+        else:
+            exp = _exp
         if exp.is_negative and base.is_number and base.is_real is False:
             base = base.conjugate() / (base * base.conjugate())._evalf(prec)
             exp = -exp
             return self.func(base, exp).expand()
+        numer, denom = _exp.as_numer_denom()
+        if base.is_real and _exp.is_real and _exp.is_Rational and denom.is_odd:
+            sign = 1 if numer.is_even or base.is_positive else -1
+            return sign * self.func(sign*base, exp)
         return self.func(base, exp)
 
     def _eval_is_polynomial(self, syms):

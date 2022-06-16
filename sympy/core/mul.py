@@ -631,7 +631,9 @@ class Mul(Expr, AssocOp):
         # don't break up NC terms: (A*B)**3 != A**3*B**3, it is A*B*A*B*A*B
         cargs, nc = b.args_cnc(split_1=False)
 
-        if e.is_Integer:
+        if e.is_Integer or (
+            b.is_real and e.is_Rational and e.as_numer_denom()[1].is_odd
+        ):
             return Mul(*[Pow(b, e, evaluate=False) for b in cargs]) * \
                 Pow(Mul._from_args(nc), e, evaluate=False)
         if e.is_Rational and e.q == 2:
