@@ -186,6 +186,17 @@ class Pow(Expr):
                 if abs(e).is_infinite:
                     return S.NaN
                 return S.One
+            elif e.is_rational and e.is_real and b is S.NegativeOne:
+                from sympy import numer, denom
+                n, d = numer(e), denom(e)
+                if d.is_odd:
+                    sign = 1 if n.is_even else -1
+                    obj = Expr.__new__(cls, -1*b, e)
+                    obj = cls._exec_constructor_postprocessors(obj)
+                    if not isinstance(obj, Pow):
+                        return sign*obj
+                    obj.is_commutative = (b.is_commutative and e.is_commutative)
+                    return sign*obj
             else:
                 # recognize base as E
                 from sympy.functions.elementary.exponential import exp_polar
