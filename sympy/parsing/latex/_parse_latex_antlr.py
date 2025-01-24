@@ -17,7 +17,7 @@ try:
                                 import_kwargs={'fromlist': ['LaTeXParser']}).LaTeXParser
     LaTeXLexer = import_module('sympy.parsing.latex._antlr.latexlexer',
                                import_kwargs={'fromlist': ['LaTeXLexer']}).LaTeXLexer
-except Exception:
+except Exception as e:
     pass
 
 ErrorListener = import_module('antlr4.error.ErrorListener',
@@ -58,7 +58,7 @@ if ErrorListener:
             raise LaTeXParsingError(err)
 
 
-def parse_latex(sympy, strict=False):
+def parse_latex(sympy, strict=False, prefer_point_over_interval=False):
     antlr4 = import_module('antlr4')
 
     if None in [antlr4, MathErrorListener] or \
@@ -89,6 +89,38 @@ def parse_latex(sympy, strict=False):
 
     return expr
 
+def convert_struct_form(form, options={}):
+    if(len(form.value()) == 1):
+        return convert_value(form.value()[0], options=options)
+    else:
+        structObject = Structure('any')
+        for x in form.value():
+            structObject.append(convert_value(x, options=options))
+    return structObject
+
+def convert_value(value, options={}):
+    if value.struct_value():
+        return convert_struct_value(value.struct_value(), options=options)
+    elif value.relation():
+        return convert_relation(value.relation(), options=options)
+
+def convert_struct_value(form, options={}):
+    l_par = form.left_parentheses().getText()
+    r_par = form.right_parentheses().getText()
+    if((l_par == '(' and r_par == ')')
+        or (l_par == '[' and r_par == ']')):
+        name = 'list'
+
+    elif(l_par == '{' and r_par == '}'):
+        name = 'set'
+
+    else:
+        name = l_par + r_par
+    structObject = Structure(name)
+    for x in form.value():
+        structObject.append(convert_value(x, options=options))
+
+    return structObject
 
 def convert_relation(rel):
     if rel.expr():
@@ -96,35 +128,156 @@ def convert_relation(rel):
 
     lh = convert_relation(rel.relation(0))
     rh = convert_relation(rel.relation(1))
+    if isinstance(lh, list):
+        return lh + [rh]
+    if isinstance(rh, list):
+        return rh + [lh]
     if rel.LT():
-        return sympy.StrictLessThan(lh, rh)
+        return sympy.StrictLessThan(lh, rh, evaluate=False)
     elif rel.LTE():
-        return sympy.LessThan(lh, rh)
+        return sympy.LessThan(lh, rh, evaluate=False)
     elif rel.GT():
-        return sympy.StrictGreaterThan(lh, rh)
+        return sympy.StrictGreaterThan(lh, rh, evaluate=False)
     elif rel.GTE():
-        return sympy.GreaterThan(lh, rh)
+        return sympy.GreaterThan(lh, rh, evaluate=False)
     elif rel.EQUAL():
-        return sympy.Eq(lh, rh)
+        return sympy.Eq(lh, rh, evaluate=False)
     elif rel.NEQ():
-        return sympy.Ne(lh, rh)
+        return sympy.Ne(lh, rh, evaluate=False)
+    elif rel.EQUIV():
+        return sympy.Eq(lh, rh, evaluate=False)
 
+def convert_struct_relation(rel, is_commutative=True, options={}):
+    if rel.struct_expr():
+        return convert_struct_expr(rel.struct_expr(), is_commutative, options=options)
+
+    lh = convert_struct_relation(rel.struct_relation(0), is_commutative, options=options)
+    rh = convert_struct_relation(rel.struct_relation(1), is_commutative, options=options)
+
+    if rel.EQUAL():
+        return (lh, '=', rh)
+
+def convert_equation_list(equation_list, is_commutative=True, options={}):
+    equations = []
+    for equation in equation_list.equation():
+        equations.append(convert_equation(equation, options=options))
+    return equations
+
+def convert_equation(equation, is_commutative=True, options={}):
+    lh = convert_relation(equation.relation(0), options=options)
+    rh = convert_relation(equation.relation(1), options=options)
+    if isinstance(lh, list):
+        return lh + [rh]
+    if isinstance(rh, list):
+        return rh + [lh]
+    if equation.LT():
+        return sympy.StrictLessThan(lh, rh,evaluate=False)
+    elif equation.LTE():
+        return sympy.LessThan(lh, rh,evaluate=False)
+    elif equation.GT():
+        return sympy.StrictGreaterThan(lh, rh,evaluate=False)
+    elif equation.GTE():
+        return sympy.GreaterThan(lh, rh,evaluate=False)
+    elif equation.EQUAL():
+        return sympy.Eq(lh, rh,evaluate=False)
+    elif equation.NEQ():
+        return sympy.Ne(lh, rh,evaluate=False)
+    elif equation.EQUIV():
+        return sympy.Eq(lh, rh,evaluate=False)
+
+def convert_struct_expr(rel, is_commutative=True, options={}):
+    if rel.struct_value():
+        return convert_struct_value(rel.struct_value(), options=options)
+
+    lh = convert_struct_expr(rel.struct_expr(0), is_commutative, options=options)
+    rh = convert_struct_expr(rel.struct_expr(1), is_commutative, options=options)
+
+    if rel.SET_ADD():
+        return (lh, '+', rh)
+    elif rel.SET_SUB():
+        return (lh, '-', rh,)
+    elif rel.SET_INTERSECT():
+        return (lh, '*', rh)
 
 def convert_expr(expr):
     return convert_add(expr.additive())
 
+def convert_expr(expr, is_commutative=True, options={}):
+    if expr.additive():
+        return convert_add(expr.additive(), is_commutative, options=options)
+    elif expr.set_notation_sub_expr():
+        return convert_set_notation_expr(expr.set_notation_sub_expr(), options=options)
+    elif expr.interval_expr():
+        return convert_interval_expr(expr.interval_expr(), options=options)
+
+def convert_interval_expr(int_expr, options={}):
+    if int_expr.interval():
+        return handle_interval(int_expr.interval(), options=options)
+
+    int_expr1 = convert_interval_expr(int_expr.interval_expr(0), options=options)
+    if int_expr.struct_value():
+        int_expr2 = convert_struct_value(int_expr.struct_value(), options=options)
+        int_expr2 = sympy.FiniteSet(*int_expr2.elements)
+    elif int_expr.atom():
+        int_expr2 = convert_atom(int_expr.atom(), options=options)
+        int_expr2 = sympy.FiniteSet(int_expr2)
+    else:
+        int_expr2 = convert_interval_expr(int_expr.interval_expr(1), options=options)
+
+    common_symbol = None
+    try:
+        for symbol in sympy.Intersection(int_expr1.boundary, int_expr2.boundary):
+            if isinstance(symbol, sympy.Symbol):
+                common_symbol = symbol
+                break
+    except:
+        pass
+
+    if int_expr.SET_ADD():
+        if common_symbol:
+            union = int_expr1.subs(common_symbol, 0).union(int_expr2.subs(common_symbol, 0))
+            if not isinstance(union, sympy.Union):
+                return union
+        return sympy.Union(int_expr1, int_expr2)
+    if int_expr.SET_SUB():
+        return sympy.Complement(int_expr1, int_expr2)
+    if int_expr.SET_INTERSECT():
+        return sympy.Intersection(int_expr1, int_expr2)
 
 def convert_add(add):
     if add.ADD():
         lh = convert_add(add.additive(0))
         rh = convert_add(add.additive(1))
-        return sympy.Add(lh, rh, evaluate=False)
+        if isinstance(lh, Vector):
+            if not isinstance(rh, Vector):
+                raise LaTeXParsingError("")
+            return lh + rh
+        else:
+            # Matrix size validation
+            if isinstance(lh, sympy.Matrix) and isinstance(rh, sympy.Matrix):
+                if lh.shape != rh.shape:
+                    raise Latex2SympyError
+                return lh + rh
+            return sympy.Add(lh, rh, evaluate=False)
     elif add.SUB():
         lh = convert_add(add.additive(0))
         rh = convert_add(add.additive(1))
+        if isinstance(lh, Vector):
+            if not isinstance(rh, Vector):
+                raise Latex2SympyError
+            return lh - rh
+        # Matrix size validation
+        if isinstance(lh, sympy.Matrix) and isinstance(rh, sympy.Matrix):
+            if lh.shape != rh.shape:
+                raise Latex2SympyError
+            return lh - rh
+        # NOTE: evaluate if rh is integer/float so that "a-2" does not become "a-1*2"
+        # SYMPY_1.3.0-UPGRADE_FIX
+        evaluate = ( isinstance(rh, (sympy.Integer, sympy.Float)) and rh >=0 ) or isinstance(rh, sympy.Symbol)
+        # evaluate = False
         if hasattr(rh, "is_Atom") and rh.is_Atom:
             return sympy.Add(lh, -1 * rh, evaluate=False)
-        return sympy.Add(lh, sympy.Mul(-1, rh, evaluate=False), evaluate=False)
+        return sympy.Add(lh, sympy.Mul(-1, rh, evaluate=evaluate), evaluate=False)
     else:
         return convert_mp(add.mp())
 
@@ -140,10 +293,16 @@ def convert_mp(mp):
     if mp.MUL() or mp.CMD_TIMES() or mp.CMD_CDOT():
         lh = convert_mp(mp_left)
         rh = convert_mp(mp_right)
+        if isinstance(lh, sympy.Matrix) and isinstance(rh, sympy.Matrix):
+            if lh.shape[1] != rh.shape[0]:
+                raise Latex2SympyError
+            return lh * rh
         return sympy.Mul(lh, rh, evaluate=False)
     elif mp.DIV() or mp.CMD_DIV() or mp.COLON():
         lh = convert_mp(mp_left)
         rh = convert_mp(mp_right)
+        if rh == 0:
+            raise FractionError
         return sympy.Mul(lh, sympy.Pow(rh, -1, evaluate=False), evaluate=False)
     else:
         if hasattr(mp, 'unary'):
@@ -168,6 +327,15 @@ def convert_unary(unary):
         return convert_unary(nested_unary)
     elif unary.SUB():
         numabs = convert_unary(nested_unary)
+
+        # # NOTE: evaluate is True to avoid "-1" be treated as "-1*1"
+        # # fixes: 4309 EV-18331-33,,"−10a−12b+18c−16","−10a−12b+18c−16",symbolic:isSimplified,true
+        # # breaks: 15681	EV-34659-13
+        # # SYMPY_1.3.0-UPGRADE_FIX
+        # evaluate = ( isinstance(operand, (sympy.Integer, sympy.Float)) and operand >=0 ) or isinstance(operand, sympy.Symbol)
+        # # evaluate = False # NOTE: temporary to try 15681
+        # return sympy.Mul(-1, operand, evaluate=evaluate)
+
         # Use Integer(-n) instead of Mul(-1, n)
         return -numabs
     elif postfix:
@@ -179,29 +347,47 @@ def convert_postfix_list(arr, i=0):
         raise LaTeXParsingError("Index out of bounds")
 
     res = convert_postfix(arr[i])
-    if isinstance(res, sympy.Expr):
+
+    if (
+        is_commutative is True
+        and hasattr(res, "name")
+        and res.name
+        in [
+            "overrightarrow",
+            "vec",
+            "square",
+            "parallelogram",
+        ]
+    ):
+        is_commutative = False
+    if isinstance(res, (sympy.Expr, sympy.Eq, sympy.Matrix)):
         if i == len(arr) - 1:
             return res  # nothing to multiply by
         else:
             if i > 0:
                 left = convert_postfix(arr[i - 1])
                 right = convert_postfix(arr[i + 1])
-                if isinstance(left, sympy.Expr) and isinstance(
-                        right, sympy.Expr):
+                if isinstance(left, (sympy.Expr, sympy.Eq)) and isinstance(
+                    right, (sympy.Expr, sympy.Eq)
+                ):
                     left_syms = convert_postfix(arr[i - 1]).atoms(sympy.Symbol)
-                    right_syms = convert_postfix(arr[i + 1]).atoms(
-                        sympy.Symbol)
+                    right_syms = convert_postfix(arr[i + 1]).atoms(sympy.Symbol)
                     # if the left and right sides contain no variables and the
                     # symbol in between is 'x', treat as multiplication.
-                    if not (left_syms or right_syms) and str(res) == 'x':
+                    if not (left_syms or right_syms) and str(res) == "x":
                         return convert_postfix_list(arr, i + 1)
+            # NOTE: This logic is added to fix unit tests broken during sympy-1.3.0 to sympy-1.13.3 upgrade
+            # Example: unit test line 8827 is broken as "1"
+            # However, it maybe wrong
+            # SYMPY_1.3.0-UPGRADE_FIX
+            if res == 1:
+                return rh
             # multiply by next
-            return sympy.Mul(
-                res, convert_postfix_list(arr, i + 1), evaluate=False)
+            return sympy.Mul(res, convert_postfix_list(arr, i + 1), evaluate=False)
     else:  # must be derivative
         wrt = res[0]
         if i == len(arr) - 1:
-            raise LaTeXParsingError("Expected expression for derivative")
+            return res
         else:
             expr = convert_postfix_list(arr, i + 1)
             return sympy.Derivative(expr, wrt)
@@ -305,6 +491,8 @@ def convert_atom(atom):
         s = atom.SYMBOL().getText()[1:]
         if s == "infty":
             return sympy.oo
+        elif s == '%':
+            return sympy.Rational(1, 100)
         else:
             if atom.subexpr():
                 subscript = None

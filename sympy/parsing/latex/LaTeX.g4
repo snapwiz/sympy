@@ -16,6 +16,7 @@ options {
 	language = Python3;
 }
 
+EWS: '\\ ' -> skip;
 WS: [ \t\r\n]+ -> skip;
 THINSPACE: ('\\,' | '\\thinspace') -> skip;
 MEDSPACE: ('\\:' | '\\medspace') -> skip;
@@ -46,20 +47,34 @@ IGNORE:
 	) -> skip;
 
 ADD: '+';
-SUB: '-';
+SUB: ( '-' | '\u2212' );
 MUL: '*';
 DIV: '/';
 
-L_PAREN: '(';
-R_PAREN: ')';
-L_BRACE: '{';
-R_BRACE: '}';
+SET_ADD: '\\cup';
+SET_SUB: '\\backslash' | '\\setminus';
+SET_INTERSECT: '\\cap';
+
+L_PAREN: '\\left'? '(';
+R_PAREN: '\\right'? ')';
+L_BRACE: '\\left'? '{';
+R_BRACE: '\\right'? '}';
 L_BRACE_LITERAL: '\\{';
 R_BRACE_LITERAL: '\\}';
-L_BRACKET: '[';
-R_BRACKET: ']';
+L_BRACKET: '\\left'? '[';
+R_BRACKET: '\\right'? ']';
 
-BAR: '|';
+// TODO: These were found to be not used anywhere in old math-engine code
+// LEFT_PARENTHESES: L_PAREN | L_BRACE | L_BRACKET;
+// RIGHT_PARENTHESES: R_PAREN | R_BRACE | R_BRACKET;
+
+BAR: '\\left'? '|' | '\\right'? '|';
+
+HLINE: '\\hline';
+
+OVERLINE: '\\overline';
+
+SMASH_BIG: '\\smash{\\big)}';
 
 R_BAR: '\\right|';
 L_BAR: '\\left|';
@@ -76,6 +91,8 @@ LIM_APPROACH_SYM:
 FUNC_INT:
     '\\int'
     | '\\int\\limits';
+FUNC_IINT: '\\iint';
+FUNC_OINT: '\\oint';
 FUNC_SUM: '\\sum';
 FUNC_PROD: '\\prod';
 
@@ -98,11 +115,28 @@ FUNC_ARCSEC: '\\arcsec';
 FUNC_ARCCOT: '\\arccot';
 
 FUNC_SINH: '\\sinh';
+FUNC_SECH: '\\sech';
 FUNC_COSH: '\\cosh';
+FUNC_CSCH: '\\csch';
 FUNC_TANH: '\\tanh';
-FUNC_ARSINH: '\\arsinh';
-FUNC_ARCOSH: '\\arcosh';
-FUNC_ARTANH: '\\artanh';
+FUNC_COTH: '\\coth';
+FUNC_ARCSINH: '\\arcsinh';
+FUNC_ARCSECH: '\\arcsech';
+FUNC_ARCCOSH: '\\arccosh';
+FUNC_ARCCSCH: '\\arccsch';
+FUNC_ARCTANH: '\\arctanh';
+FUNC_ARCCOTH: '\\arccoth';
+FUNC_MATRIX_START: '\\begin{bmatrix}';
+FUNC_MATRIX_END: '\\end{bmatrix}';
+FUNC_MATRIX_DETERMINENT_START: '\\begin{vmatrix}';
+FUNC_MATRIX_DETERMINENT_END: '\\end{vmatrix}';
+FUNC_AL_MATRIX_PIECEWISE_START: '\\begin{almatrix}';
+FUNC_AL_MATRIX_PIECEWISE_END: '\\end{almatrix}';
+FUNC_AR_MATRIX_PIECEWISE_START: '\\begin{armatrix}';
+FUNC_AR_MATRIX_PIECEWISE_END: '\\end{armatrix}';
+FUNC_PIECEWISE_START: '\\begin{array}{lc}';
+FUNC_ARRAY_END: '\\end{array}';
+FUNC_CALCULATION_START: '\\begin{array}{r}';
 
 L_FLOOR: '\\lfloor';
 R_FLOOR: '\\rfloor';
@@ -110,7 +144,12 @@ L_CEIL: '\\lceil';
 R_CEIL: '\\rceil';
 
 FUNC_SQRT: '\\sqrt';
-FUNC_OVERLINE: '\\overline';
+FUNC_ABS: '\\abs';
+FUNC_RE: '\\Re';
+FUNC_IM: '\\Im';
+FUNC_ARG: '\\arg';
+// TODO: FUNC_OVERLINE was not used in code
+// FUNC_OVERLINE: '\\overline';
 
 CMD_TIMES: '\\times';
 CMD_CDOT: '\\cdot';
@@ -118,33 +157,41 @@ CMD_DIV: '\\div';
 CMD_FRAC:
     '\\frac'
     | '\\dfrac'
+    | '\\cfrac'
     | '\\tfrac';
 CMD_BINOM: '\\binom';
 CMD_DBINOM: '\\dbinom';
 CMD_TBINOM: '\\tbinom';
 
 CMD_MATHIT: '\\mathit';
+CMD_ANGLE: '\\angle';
+
+CMD_CIRCLE: '\\circ';
 
 UNDERSCORE: '_';
 CARET: '^';
 COLON: ':';
+SEMI_COLON: ';';
+AMP: '&';
 
 fragment WS_CHAR: [ \t\r\n];
 DIFFERENTIAL: 'd' WS_CHAR*? ([a-zA-Z] | '\\' [a-zA-Z]+);
+MULTI_DIFFERENTIAL: DIFFERENTIAL+;
 
 LETTER: [a-zA-Z];
 DIGIT: [0-9];
 
-EQUAL: (('&' WS_CHAR*?)? '=') | ('=' (WS_CHAR*? '&')?);
+EQUAL: (('&' WS_CHAR*?)? '=') | ('=' (WS_CHAR*? '&')?) | '=' | '\\eq';
 NEQ: '\\neq';
-
-LT: '<';
-LTE: ('\\leq' | '\\le' | LTE_Q | LTE_S);
+LT: '<' | '\\lt';
+LTE: ('<=' | '\\leq' | '\\le' | LTE_Q | LTE_S);
 LTE_Q: '\\leqq';
 LTE_S: '\\leqslant';
+GT: '>' | '\\gt';
+GTE: '>=' | '\\geq' | '\\ge' | GTE_Q | GTE_S;
+EQUIV: '\\equiv';
+OTHERWISE: 'otherwise';
 
-GT: '>';
-GTE: ('\\geq' | '\\ge' | GTE_Q | GTE_S);
 GTE_Q: '\\geqq';
 GTE_S: '\\geqslant';
 
@@ -152,17 +199,57 @@ BANG: '!';
 
 SINGLE_QUOTES: '\''+;
 
-SYMBOL: '\\' [a-zA-Z]+;
+SYMBOL: '\\' ( [a-zA-Z]+ | '%');
 
-math: relation;
+// TODO: see if this can be converted into lexer symbol i.e. LEFT_PARENTHESES, RIGHT_PARENTHESES
+left_parentheses: L_PAREN | L_BRACE | L_BRACKET;
+right_parentheses: R_PAREN | R_BRACE | R_BRACKET;
+
+math: relation | struct_relation | equation_list;
 
 relation:
-	relation (EQUAL | LT | LTE | GT | GTE | NEQ) relation
+	relation (EQUAL | LT | LTE | GT | GTE | NEQ | EQUIV) relation
 	| expr;
+
+equation: relation (EQUAL | LT | LTE | GT | GTE | NEQ | EQUIV) relation;
+
+equation_list: equation (SEMI_COLON equation | ',' equation)*;
+
+struct_relation:
+    struct_relation (EQUAL) struct_relation
+    | struct_expr;
+
+struct_expr:
+    struct_expr (SET_ADD | SET_SUB | SET_INTERSECT) struct_expr
+    | L_PAREN struct_expr (SET_ADD | SET_SUB | SET_INTERSECT) struct_expr R_PAREN
+    | struct_value;
+
+struct_form:
+     value ('~' value)*;
+
+struct_value:
+    left_parentheses
+    value? ('~' value)*
+    right_parentheses;
+
+value:
+    struct_value
+    | relation;
+
+interval_opr:
+    L_PAREN | L_BRACKET | R_PAREN | R_BRACKET;
+
+interval:
+    interval_opr expr '~' expr interval_opr;
+
+interval_expr:
+    interval_expr (SET_ADD | SET_SUB | SET_INTERSECT) (interval_expr | struct_value | atom)
+    | L_PAREN interval_expr (SET_ADD | SET_SUB | SET_INTERSECT) (interval_expr | struct_value | atom) R_PAREN
+    | interval;
 
 equality: expr EQUAL expr;
 
-expr: additive;
+expr: set_notation_sub_expr | interval_expr | additive;
 
 additive: additive (ADD | SUB) additive | mp;
 
@@ -211,7 +298,8 @@ comp:
 	| func
 	| atom
 	| floor
-	| ceil;
+	| ceil
+  | vector;
 
 comp_nofunc:
 	group
@@ -237,7 +325,11 @@ atom: (LETTER | SYMBOL) (subexpr? SINGLE_QUOTES? | SINGLE_QUOTES? subexpr?)
 	| frac
 	| binom
 	| bra
-	| ket;
+	| ket
+  | angle;
+
+angle: CMD_ANGLE angle_points;
+angle_points: LETTER+ LETTER+ LETTER+ | LETTER+;
 
 bra: L_ANGLE expr (R_BAR | BAR);
 ket: (L_BAR | BAR) expr R_ANGLE;
@@ -274,9 +366,27 @@ func_normal:
 	| FUNC_SINH
 	| FUNC_COSH
 	| FUNC_TANH
-	| FUNC_ARSINH
-	| FUNC_ARCOSH
-	| FUNC_ARTANH;
+  | FUNC_SECH
+  | FUNC_CSCH
+  | FUNC_COTH
+  | FUNC_ARCSINH
+  | FUNC_ARCCOSH
+  | FUNC_ARCTANH
+  | FUNC_ARCSECH
+  | FUNC_ARCCSCH
+  | FUNC_ARCCOTH
+  | FUNC_EXP
+  | FUNC_ABS
+  | FUNC_RE
+  | FUNC_IM
+  | FUNC_ARG
+  | OVERLINE;
+
+func_name:
+    LETTER | SYMBOL;
+
+func_composition:
+    func_name CMD_CIRCLE (func_name | func_composition);
 
 func:
 	func_normal (subexpr? supexpr? | supexpr? subexpr?) (
@@ -285,24 +395,62 @@ func:
 	)
 	| (LETTER | SYMBOL) (subexpr? SINGLE_QUOTES? | SINGLE_QUOTES? subexpr?) // e.g. f(x), f_1'(x)
 	L_PAREN args R_PAREN
+  | L_PAREN func_composition R_PAREN // e.g. (f∘g)(x)
+  L_PAREN args R_PAREN
 	| FUNC_INT (subexpr supexpr | supexpr subexpr)? (
 		additive? DIFFERENTIAL
 		| frac
 		| additive
 	)
+    | FUNC_IINT
+    (subexpr)?
+    (additive? MULTI_DIFFERENTIAL | frac | additive)
+    | FUNC_OINT
+    (subexpr)?
+    (additive? DIFFERENTIAL | frac | additive)
 	| FUNC_SQRT (L_BRACKET root = expr R_BRACKET)? L_BRACE base = expr R_BRACE
-	| FUNC_OVERLINE L_BRACE base = expr R_BRACE
-	| (FUNC_SUM | FUNC_PROD) (subeq supexpr | supexpr subeq) mp
-	| FUNC_LIM limit_sub mp;
+	// | FUNC_OVERLINE L_BRACE base = expr R_BRACE
+  | FUNC_SUM
+  (subeq supexpr | subexpr supexpr | supexpr subeq | supexpr subexpr)
+  mp
+  | FUNC_PROD
+  (subeq supexpr | supexpr subeq)
+  mp
+	| FUNC_LIM limit_sub mp
+  | FUNC_MATRIX_START matrix FUNC_MATRIX_END
+  | FUNC_MATRIX_DETERMINENT_START matrix FUNC_MATRIX_DETERMINENT_END
+  | FUNC_AL_MATRIX_PIECEWISE_START matrix_piecewise FUNC_AL_MATRIX_PIECEWISE_END
+  | FUNC_AR_MATRIX_PIECEWISE_START matrix_piecewise FUNC_AR_MATRIX_PIECEWISE_END
+  | L_BRACE FUNC_PIECEWISE_START piecewise FUNC_ARRAY_END '.'
+  | FUNC_CALCULATION_START calculation FUNC_ARRAY_END
+  | FUNC_AL_MATRIX_PIECEWISE_START matrix_relation FUNC_AL_MATRIX_PIECEWISE_END
+  | FUNC_AR_MATRIX_PIECEWISE_START matrix_relation FUNC_AR_MATRIX_PIECEWISE_END;
 
-args: (expr ',' args) | expr;
+args: (expr '~' args) | expr;
 
 limit_sub:
 	UNDERSCORE L_BRACE (LETTER | SYMBOL) LIM_APPROACH_SYM expr (
 		CARET ((L_BRACE (ADD | SUB) R_BRACE) | ADD | SUB)
 	)? R_BRACE;
 
-func_arg: expr | (expr ',' func_arg);
+set_notation_sub:
+    L_BRACE
+    (LETTER | SYMBOL)
+    BAR
+    relation
+    R_BRACE;
+
+set_notation_sub_expr:
+    set_notation_sub_expr (SET_ADD | SET_SUB | SET_INTERSECT) set_notation_sub_expr
+    | L_PAREN set_notation_sub_expr (SET_ADD | SET_SUB | SET_INTERSECT) set_notation_sub_expr R_PAREN
+    | set_notation_sub;
+
+matrix_row:
+    expr ('&' expr)*;
+matrix:
+    matrix_row ('\\\\' matrix_row)*;
+
+func_arg: expr | (expr '~' func_arg);
 func_arg_noparens: mp_nofunc;
 
 subexpr: UNDERSCORE (atom | L_BRACE expr R_BRACE);
@@ -310,3 +458,19 @@ supexpr: CARET (atom | L_BRACE expr R_BRACE);
 
 subeq: UNDERSCORE L_BRACE equality R_BRACE;
 supeq: UNDERSCORE L_BRACE equality R_BRACE;
+
+vector: LT func_arg GT;
+
+piecewise_func: expr AMP 'if' relation;
+piecewise: piecewise_func ('\\\\' piecewise_func)*;
+
+matrix_piecewise_func: expr | expr (SEMI_COLON | AMP | 'if') relation | expr OTHERWISE;
+matrix_piecewise: matrix_piecewise_func ('\\\\' matrix_piecewise_func)*;
+
+calculation_add: number '\\\\' ADD number '\\\\' HLINE number;
+calculation_sub: number '\\\\' SUB number '\\\\' HLINE number;
+calculation_mul: number '\\\\' (CMD_TIMES | MUL) number '\\\\' HLINE number;
+calculation_div: number '\\\\' number L_BRACE OVERLINE L_BRACE SMASH_BIG number R_BRACE R_BRACE;
+calculation: calculation_add | calculation_sub | calculation_mul | calculation_div;
+
+matrix_relation: relation ('\\\\' relation)*;

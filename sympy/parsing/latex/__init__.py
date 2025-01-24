@@ -10,7 +10,7 @@ __doctest_requires__ = {('parse_latex',): ['antlr4', 'lark']}
 
 
 @doctest_depends_on(modules=('antlr4', 'lark'))
-def parse_latex(s, strict=False, backend="antlr"):
+def parse_latex(s, strict=False, backend="antlr", prefer_point_over_interval=False):
     r"""Converts the input LaTeX string ``s`` to a SymPy ``Expr``.
 
     Parameters
@@ -58,7 +58,7 @@ def parse_latex(s, strict=False, backend="antlr"):
             import_kwargs={'fromlist': ['X']})
 
         if _latex is not None:
-            return _latex.parse_latex(s, strict)
+            return _latex.parse_latex(s, strict, prefer_point_over_interval=False)
     elif backend == "lark":
         return parse_latex_lark(s)
     else:
