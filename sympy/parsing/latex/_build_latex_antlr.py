@@ -61,8 +61,9 @@ def build_parser(output_dir=dir_latex_antlr):
     debug("Applying headers, removing unnecessary files and renaming...")
     # Handle case insensitive file systems. If the files are already
     # generated, they will be written to latex* but LaTeX*.* won't match them.
-    for path in (glob.glob(os.path.join(output_dir, "LaTeX*.*")) or
-        glob.glob(os.path.join(output_dir, "latex*.*"))):
+    for path in glob.glob(os.path.join(output_dir, "LaTeX*.*")) + glob.glob(
+        os.path.join(output_dir, "latex*.*")
+    ):
 
         # Remove files ending in .interp or .tokens as they are not needed.
         if not path.endswith(".py"):
