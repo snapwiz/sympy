@@ -25,6 +25,46 @@ ErrorListener = import_module('antlr4.error.ErrorListener',
                               import_kwargs={'fromlist': ['ErrorListener']}
                               )
 
+class LaTeXParsingContext(object):
+    _context_stack = []
+    DEFAULT_OPTIONS = {
+        "is_commutative": True,
+        "prefer_point_over_interval": False,
+        "force_set": False,
+    }
+
+    def __init__(
+        self, is_commutative=None, prefer_point_over_interval=None, force_set=None
+    ):
+        new_options = {
+            "is_commutative": is_commutative,
+            "prefer_point_over_interval": prefer_point_over_interval,
+            "force_set": force_set,
+        }
+        self.options = {
+            **self.__class__.getOptions(),
+            **{k: v for k, v in new_options if v is not None},
+        }
+
+    def __enter__(self):
+        self.__class__._context_stack.append(self)
+
+    def __exit__(self, type, value, traceback):
+        assert len(self.__class__._context_stack) > 0, (
+            "UnReachable Code: Context __exit__ called more times than Context __enter__"
+        )
+        self.__class__._context_stack.pop()
+
+    @classmethod
+    def getOptions(cls):
+        if cls._context_stack:
+            return cls._context_stack[-1].options
+        else:
+            return cls.DEFAULT_OPTIONS
+
+    @classmethod
+    def getOption(cls, optionName):
+        return cls.getOptions()[optionName]
 
 
 if ErrorListener:
@@ -58,7 +98,7 @@ if ErrorListener:
             raise LaTeXParsingError(err)
 
 
-def parse_latex(sympy, strict=False, prefer_point_over_interval=False):
+def parse_latex(sympy, strict=False):
     antlr4 = import_module('antlr4')
 
     if None in [antlr4, MathErrorListener] or \
@@ -89,22 +129,22 @@ def parse_latex(sympy, strict=False, prefer_point_over_interval=False):
 
     return expr
 
-def convert_struct_form(form, options={}):
+def convert_struct_form(form):
     if(len(form.value()) == 1):
-        return convert_value(form.value()[0], options=options)
+        return convert_value(form.value()[0])
     else:
         structObject = Structure('any')
         for x in form.value():
-            structObject.append(convert_value(x, options=options))
+            structObject.append(convert_value(x))
     return structObject
 
-def convert_value(value, options={}):
+def convert_value(value):
     if value.struct_value():
-        return convert_struct_value(value.struct_value(), options=options)
+        return convert_struct_value(value.struct_value())
     elif value.relation():
-        return convert_relation(value.relation(), options=options)
+        return convert_relation(value.relation())
 
-def convert_struct_value(form, options={}):
+def convert_struct_value(form):
     l_par = form.left_parentheses().getText()
     r_par = form.right_parentheses().getText()
     if((l_par == '(' and r_par == ')')
@@ -118,7 +158,7 @@ def convert_struct_value(form, options={}):
         name = l_par + r_par
     structObject = Structure(name)
     for x in form.value():
-        structObject.append(convert_value(x, options=options))
+        structObject.append(convert_value(x))
 
     return structObject
 
@@ -147,25 +187,25 @@ def convert_relation(rel):
     elif rel.EQUIV():
         return sympy.Eq(lh, rh, evaluate=False)
 
-def convert_struct_relation(rel, is_commutative=True, options={}):
+def convert_struct_relation(rel):
     if rel.struct_expr():
-        return convert_struct_expr(rel.struct_expr(), is_commutative, options=options)
+        return convert_struct_expr(rel.struct_expr())
 
-    lh = convert_struct_relation(rel.struct_relation(0), is_commutative, options=options)
-    rh = convert_struct_relation(rel.struct_relation(1), is_commutative, options=options)
+    lh = convert_struct_relation(rel.struct_relation(0))
+    rh = convert_struct_relation(rel.struct_relation(1))
 
     if rel.EQUAL():
         return (lh, '=', rh)
 
-def convert_equation_list(equation_list, is_commutative=True, options={}):
+def convert_equation_list(equation_list):
     equations = []
     for equation in equation_list.equation():
-        equations.append(convert_equation(equation, options=options))
+        equations.append(convert_equation(equation))
     return equations
 
-def convert_equation(equation, is_commutative=True, options={}):
-    lh = convert_relation(equation.relation(0), options=options)
-    rh = convert_relation(equation.relation(1), options=options)
+def convert_equation(equation):
+    lh = convert_relation(equation.relation(0))
+    rh = convert_relation(equation.relation(1))
     if isinstance(lh, list):
         return lh + [rh]
     if isinstance(rh, list):
@@ -185,12 +225,12 @@ def convert_equation(equation, is_commutative=True, options={}):
     elif equation.EQUIV():
         return sympy.Eq(lh, rh,evaluate=False)
 
-def convert_struct_expr(rel, is_commutative=True, options={}):
+def convert_struct_expr(rel):
     if rel.struct_value():
-        return convert_struct_value(rel.struct_value(), options=options)
+        return convert_struct_value(rel.struct_value())
 
-    lh = convert_struct_expr(rel.struct_expr(0), is_commutative, options=options)
-    rh = convert_struct_expr(rel.struct_expr(1), is_commutative, options=options)
+    lh = convert_struct_expr(rel.struct_expr(0))
+    rh = convert_struct_expr(rel.struct_expr(1))
 
     if rel.SET_ADD():
         return (lh, '+', rh)
@@ -202,27 +242,27 @@ def convert_struct_expr(rel, is_commutative=True, options={}):
 def convert_expr(expr):
     return convert_add(expr.additive())
 
-def convert_expr(expr, is_commutative=True, options={}):
+def convert_expr(expr):
     if expr.additive():
-        return convert_add(expr.additive(), is_commutative, options=options)
+        return convert_add(expr.additive())
     elif expr.set_notation_sub_expr():
-        return convert_set_notation_expr(expr.set_notation_sub_expr(), options=options)
+        return convert_set_notation_expr(expr.set_notation_sub_expr())
     elif expr.interval_expr():
-        return convert_interval_expr(expr.interval_expr(), options=options)
+        return convert_interval_expr(expr.interval_expr())
 
-def convert_interval_expr(int_expr, options={}):
+def convert_interval_expr(int_expr):
     if int_expr.interval():
-        return handle_interval(int_expr.interval(), options=options)
+        return handle_interval(int_expr.interval())
 
-    int_expr1 = convert_interval_expr(int_expr.interval_expr(0), options=options)
+    int_expr1 = convert_interval_expr(int_expr.interval_expr(0))
     if int_expr.struct_value():
-        int_expr2 = convert_struct_value(int_expr.struct_value(), options=options)
+        int_expr2 = convert_struct_value(int_expr.struct_value())
         int_expr2 = sympy.FiniteSet(*int_expr2.elements)
     elif int_expr.atom():
-        int_expr2 = convert_atom(int_expr.atom(), options=options)
+        int_expr2 = convert_atom(int_expr.atom())
         int_expr2 = sympy.FiniteSet(int_expr2)
     else:
-        int_expr2 = convert_interval_expr(int_expr.interval_expr(1), options=options)
+        int_expr2 = convert_interval_expr(int_expr.interval_expr(1))
 
     common_symbol = None
     try:
@@ -348,6 +388,7 @@ def convert_postfix_list(arr, i=0):
 
     res = convert_postfix(arr[i])
 
+    is_commutative = LaTeXParsingContext.getOption('is_commutative')
     if (
         is_commutative is True
         and hasattr(res, "name")
