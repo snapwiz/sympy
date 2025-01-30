@@ -24,13 +24,15 @@ number_error_re = re.compile(
     r'(,\d{,2}(,|$))|(^0\d{1,}(,|$))|(\d{4,},)|(,\d{4,}$)'
 )
 
-LaTeXParser = LaTeXLexer = MathErrorListener = None
+LaTeXParser = LaTeXLexer = MathErrorListener = PredictionMode = None
 
 try:
     LaTeXParser = import_module('sympy.parsing.latex._antlr.latexparser',
                                 import_kwargs={'fromlist': ['LaTeXParser']}).LaTeXParser
     LaTeXLexer = import_module('sympy.parsing.latex._antlr.latexlexer',
                                import_kwargs={'fromlist': ['LaTeXLexer']}).LaTeXLexer
+    PredictionMode = import_module('antlr4.atn.PredictionMode',
+                               import_kwargs={'fromlist': ['PredictionMode']}).PredictionMode
 except Exception as e:
     pass
 
@@ -43,7 +45,10 @@ ErrorListener = import_module('antlr4.error.ErrorListener',
 class Structure():
     """
     Brief:
-        Class represeting structure
+        Class representing structure
+
+    TODO: rethink on need and placement of this class
+    Q. Can it be replaced with any python class, like list, set, etc ?
 
     Description:
         Class containing elements.
@@ -125,6 +130,13 @@ class Structure():
     def __str__(self):
         return str(self.elements)
 
+    def __repr__(self) -> str:
+        return (
+            f"Structure({self.structure_type}) {{"
+            + (", ".join(repr(e) for e in self.elements))
+            + "}"
+        )
+
 
 if ErrorListener:
     class MathErrorListener(ErrorListener.ErrorListener):  # type:ignore # noqa:F811
@@ -157,10 +169,21 @@ if ErrorListener:
             raise LaTeXParsingError(err)
 
 
-def process_set(parser, default_struct='any'):
+def process_sympy(parser):
+        math_e = parser.math()
+        if math_e.relation():
+            return convert_relation(math_e.relation())
+        elif math_e.struct_relation():
+            return convert_struct_relation(math_e.struct_relation())
+        elif math_e.equation_list():
+            return convert_equation_list(math_e.equation_list())
+        raise LaTeXParsingError("Latex2SympyError")
+
+def process_set(parser):
     try:
         struct_f = parser.struct_form()
         expr = convert_struct_form(struct_f)
+        default_struct = LaTeXParsingContext.getOption('default_struct')
         if (not isinstance(expr, Structure)):
             structObject = Structure(default_struct)
             structObject.append(expr)
@@ -169,39 +192,30 @@ def process_set(parser, default_struct='any'):
         if (expr.structure_type == 'any'):
             expr.structure_type = default_struct
             expr.clear()
-    except Exception as e:
-        raise e
-
-    return expr
-
-
-def process_sympy(parser, parser1):
-    try:
-        math_e = parser1.math()
-        if math_e.relation():
-            expr = convert_relation(math_e.relation())
-        elif math_e.struct_relation():
-            expr = convert_struct_relation(math_e.struct_relation())
-        elif math_e.equation_list():
-            expr = convert_equation_list(math_e.equation_list())
         return expr
-    except:
-        pass
+    except LaTeXParsingError:
+        raise
+    except Exception as e:
+        raise LaTeXParsingError("Failed parsing set") from e
 
-    try:
-        math_e = parser.math()
-        if math_e.relation():
-            expr = convert_relation(math_e.relation())
-        elif math_e.struct_relation():
-            expr = convert_struct_relation(math_e.struct_relation())
-        elif math_e.equation_list():
-            expr = convert_equation_list(math_e.equation_list())
-    except:
-        raise LaTeXParsingError
-    return expr
+def build_parser(input: str, matherror):
+    antlr4 = import_module('antlr4')
+
+    stream = antlr4.InputStream(input)
+    lex = LaTeXLexer(stream)
+    lex.removeErrorListeners()
+    lex.addErrorListener(matherror)
+
+    tokens = antlr4.CommonTokenStream(lex)
+    parser = LaTeXParser(tokens)
+
+    # remove default console error listener
+    parser.removeErrorListeners()
+    parser.addErrorListener(matherror)
+    return parser
 
 
-def parse_latex(sympy, force_set=False, strict=False, prefer_point_over_interval=False):
+def parse_latex(sympy, strict=False):
     antlr4 = import_module('antlr4')
 
     if None in [antlr4, MathErrorListener] or \
@@ -213,36 +227,25 @@ def parse_latex(sympy, force_set=False, strict=False, prefer_point_over_interval
     sympy = sympy.strip()
     matherror = MathErrorListener(sympy)
 
-    stream = antlr4.InputStream(sympy)
-    lex = LaTeXLexer(stream)
-    lex.removeErrorListeners()
-    lex.addErrorListener(matherror)
+    parser = build_parser(sympy, matherror)
 
-    tokens = antlr4.CommonTokenStream(lex)
-    parser = LaTeXParser(tokens)
-
-    # remove default console error listener
-    parser.removeErrorListeners()
-    parser.addErrorListener(matherror)
-
-    if force_set is True:
-        stream1 = antlr4.InputStream(sympy)
-        lex1 = LaTeXLexer(stream1)
-        lex1.removeErrorListeners()
-        lex1.addErrorListener(matherror)
-
-        tokens1 = antlr4.CommonTokenStream(lex1)
-        parser1 = LaTeXParser(tokens1)
-        parser1._interp.predictionMode = 0  # PredictionMode.SLL
-
-        # remove default console error listener
-        parser1.removeErrorListeners()
-        parser1.addErrorListener(matherror)
-
-        return process_sympy(parser, parser1)
-    else:
+    if LaTeXParsingContext.getOption('force_set') is True:
         return process_set(parser)
-
+    else:
+        if re.search(r'\d\s+\d', sympy):
+            raise LaTeXParsingError('FractionError: space not allowed between digits')
+        try:
+            parser._interp.predictionMode = PredictionMode.SLL
+            return process_sympy(parser)
+        except Exception:
+            pass
+        try:
+            parser = build_parser(sympy, matherror)
+            return process_sympy(parser)
+        except LaTeXParsingError:
+            raise
+        except Exception as e:
+            raise LaTeXParsingError(f"Error parsing '{sympy}'") from e
 
 def convert_struct_form(form):
     if(len(form.value()) == 1):
@@ -355,9 +358,6 @@ def convert_struct_expr(rel):
         return (lh, '*', rh)
 
 def convert_expr(expr):
-    return convert_add(expr.additive())
-
-def convert_expr(expr):
     if expr.additive():
         return convert_add(expr.additive())
     elif expr.set_notation_sub_expr():
@@ -385,7 +385,7 @@ def convert_interval_expr(int_expr):
             if isinstance(symbol, sympy.Symbol):
                 common_symbol = symbol
                 break
-    except:
+    except Exception:
         pass
 
     if int_expr.SET_ADD():
@@ -405,13 +405,13 @@ def convert_add(add):
         rh = convert_add(add.additive(1))
         if isinstance(lh, Vector):
             if not isinstance(rh, Vector):
-                raise LaTeXParsingError("")
+                raise LaTeXParsingError("Latex2SympyError")
             return lh + rh
         else:
             # Matrix size validation
             if isinstance(lh, sympy.Matrix) and isinstance(rh, sympy.Matrix):
                 if lh.shape != rh.shape:
-                    raise LaTeXParsingError('convert_add: add')
+                    raise LaTeXParsingError('Latex2SympyError')
                 return lh + rh
             return sympy.Add(lh, rh, evaluate=False)
     elif add.SUB():
@@ -419,19 +419,19 @@ def convert_add(add):
         rh = convert_add(add.additive(1))
         if isinstance(lh, Vector):
             if not isinstance(rh, Vector):
-                raise LaTeXParsingError('convert_add: sub - Vector')
+                raise LaTeXParsingError('Latex2SympyError')
             return lh - rh
         # Matrix size validation
         if isinstance(lh, sympy.Matrix) and isinstance(rh, sympy.Matrix):
             if lh.shape != rh.shape:
-                raise LaTeXParsingError('convert_add: sub - Matrix')
+                raise LaTeXParsingError('Latex2SympyError')
             return lh - rh
         # NOTE: evaluate if rh is integer/float so that "a-2" does not become "a-1*2"
         # SYMPY_1.3.0-UPGRADE_FIX
         evaluate = ( isinstance(rh, (sympy.Integer, sympy.Float)) and rh >=0 ) or isinstance(rh, sympy.Symbol)
         # evaluate = False
-        if hasattr(rh, "is_Atom") and rh.is_Atom:
-            return sympy.Add(lh, -1 * rh, evaluate=False)
+        # if hasattr(rh, "is_Atom") and rh.is_Atom:
+        #     return sympy.Add(lh, -1 * rh, evaluate=False)
         return sympy.Add(lh, sympy.Mul(-1, rh, evaluate=evaluate), evaluate=False)
     else:
         return convert_mp(add.mp())
@@ -450,14 +450,14 @@ def convert_mp(mp):
         rh = convert_mp(mp_right)
         if isinstance(lh, sympy.Matrix) and isinstance(rh, sympy.Matrix):
             if lh.shape[1] != rh.shape[0]:
-                raise LaTeXParsingError('Convert mp')
+                raise LaTeXParsingError('Latex2SympyError')
             return lh * rh
         return sympy.Mul(lh, rh, evaluate=False)
     elif mp.DIV() or mp.CMD_DIV() or mp.COLON():
         lh = convert_mp(mp_left)
         rh = convert_mp(mp_right)
         if rh == 0:
-            raise LaTeXParsingError('Fraction Error')
+            raise LaTeXParsingError('ZeroDivisionError: division by zero')
         return sympy.Mul(lh, sympy.Pow(rh, -1, evaluate=False), evaluate=False)
     else:
         if hasattr(mp, 'unary'):
@@ -483,16 +483,16 @@ def convert_unary(unary):
     elif unary.SUB():
         numabs = convert_unary(nested_unary)
 
-        # # NOTE: evaluate is True to avoid "-1" be treated as "-1*1"
-        # # fixes: 4309 EV-18331-33,,"−10a−12b+18c−16","−10a−12b+18c−16",symbolic:isSimplified,true
-        # # breaks: 15681	EV-34659-13
-        # # SYMPY_1.3.0-UPGRADE_FIX
-        # evaluate = ( isinstance(operand, (sympy.Integer, sympy.Float)) and operand >=0 ) or isinstance(operand, sympy.Symbol)
-        # # evaluate = False # NOTE: temporary to try 15681
-        # return sympy.Mul(-1, operand, evaluate=evaluate)
+        # NOTE: evaluate is True to avoid "-1" be treated as "-1*1"
+        # fixes: 4309 EV-18331-33,,"−10a−12b+18c−16","−10a−12b+18c−16",symbolic:isSimplified,true
+        # breaks: 15681	EV-34659-13
+        # SYMPY_1.3.0-UPGRADE_FIX
+        evaluate = ( isinstance(numabs, (sympy.Integer, sympy.Float)) and numabs >=0 ) or isinstance(numabs, sympy.Symbol)
+        # evaluate = False # NOTE: temporary to try 15681
+        return sympy.Mul(-1, numabs, evaluate=evaluate)
 
         # Use Integer(-n) instead of Mul(-1, n)
-        return -numabs
+        # return -numabs
     elif postfix:
         return convert_postfix_list(postfix)
 
@@ -516,38 +516,42 @@ def convert_postfix_list(arr, i=0):
         ]
     ):
         is_commutative = False
-    if isinstance(res, (sympy.Expr, sympy.Eq, sympy.Matrix)):
-        if i == len(arr) - 1:
-            return res  # nothing to multiply by
-        else:
-            if i > 0:
-                # todo: check for is_coomutative
-                left = convert_postfix(arr[i - 1])
-                right = convert_postfix(arr[i + 1])
-                if isinstance(left, (sympy.Expr, sympy.Eq)) and isinstance(
-                    right, (sympy.Expr, sympy.Eq)
-                ):
-                    left_syms = convert_postfix(arr[i - 1]).atoms(sympy.Symbol)
-                    right_syms = convert_postfix(arr[i + 1]).atoms(sympy.Symbol)
-                    # if the left and right sides contain no variables and the
-                    # symbol in between is 'x', treat as multiplication.
-                    if not (left_syms or right_syms) and str(res) == "x":
-                        return convert_postfix_list(arr, i + 1)
-            # NOTE: This logic is added to fix unit tests broken during sympy-1.3.0 to sympy-1.13.3 upgrade
-            # Example: unit test line 8827 is broken as "1"
-            # However, it maybe wrong
-            # SYMPY_1.3.0-UPGRADE_FIX
-            if res == 1:
-                return rh
-            # multiply by next
-            return sympy.Mul(res, convert_postfix_list(arr, i + 1), evaluate=False)
-    else:  # must be derivative
-        wrt = res[0]
-        if i == len(arr) - 1:
-            return res
-        else:
-            expr = convert_postfix_list(arr, i + 1)
-            return sympy.Derivative(expr, wrt)
+    with LaTeXParsingContext(is_commutative=is_commutative):
+        if isinstance(res, (sympy.Expr, sympy.Eq, sympy.Matrix)):
+            if i == len(arr) - 1:
+                return res  # nothing to multiply by
+            else:
+                if i > 0:
+                    # todo: check for is_coomutative
+                    left = convert_postfix(arr[i - 1])
+                    right = convert_postfix(arr[i + 1])
+                    if isinstance(left, (sympy.Expr, sympy.Eq)) and isinstance(
+                        right, (sympy.Expr, sympy.Eq)
+                    ):
+                        left_syms = convert_postfix(arr[i - 1]).atoms(sympy.Symbol)
+                        right_syms = convert_postfix(arr[i + 1]).atoms(sympy.Symbol)
+                        # if the left and right sides contain no variables and the
+                        # symbol in between is 'x', treat as multiplication.
+                        if not (left_syms or right_syms) and str(res) == "x":
+                            return convert_postfix_list(arr, i + 1)
+                rh = convert_postfix_list(arr, i + 1)
+                # NOTE: This logic is added to fix unit tests broken during sympy-1.3.0 to sympy-1.13.3 upgrade
+                # Example: unit test line 8827 is broken as "1"
+                # However, it maybe wrong
+                # SYMPY_1.3.0-UPGRADE_FIX
+                if res == 1:
+                    return rh
+                return sympy.Mul(res, rh, evaluate=False)
+        else:  # must be derivative
+            wrt = res[0]
+            if i == len(arr) - 1:
+                return res
+            else:
+                expr = convert_postfix_list(arr, i + 1)
+                result = sympy.Derivative(expr, wrt)
+                if LaTeXParsingContext.getOption('evaluate_derivative'):
+                    return result.doit()
+                return result
 
 
 def do_subs(expr, at):
@@ -608,6 +612,7 @@ def convert_exp(exp):
             exponent = convert_atom(exp.atom())
         elif exp.expr():
             exponent = convert_expr(exp.expr())
+        # FIXME: exponent can be unbound
         return sympy.Pow(base, exponent, evaluate=False)
     else:
         if hasattr(exp, 'comp'):
@@ -645,7 +650,13 @@ def convert_atom(atom):
             sname += '_{' + StrPrinter().doprint(subscript) + '}'
         if atom.SINGLE_QUOTES():
             sname += atom.SINGLE_QUOTES().getText()  # put after subscript for easy identify
-        return sympy.Symbol(sname)
+        if sname == 'E':
+            return sympy.E
+        if sname == 'I':
+            return sympy.I
+        if LaTeXParsingContext.getOption('is_commutative') is False:
+            return sympy.Symbol(sname, commutative=False)
+        return sympy.Symbol(sname, real=LaTeXParsingContext.getOption('real_symbol'))
     elif atom.SYMBOL():
         s = atom.SYMBOL().getText()[1:]
         if s == "infty":
@@ -663,19 +674,22 @@ def convert_atom(atom):
                     subscript = convert_atom(atom.subexpr().atom())
                 subscriptName = StrPrinter().doprint(subscript)
                 s += '_{' + subscriptName + '}'
-            return sympy.Symbol(s)
+            if LaTeXParsingContext.getOption('is_commutative') is False:
+                return sympy.Symbol(s, commutative=False)
+            return sympy.Symbol(s, real=LaTeXParsingContext.getOption('real_symbol'))
     elif atom.number():
         s = atom.number().getText()
         if (number_error_re.search(s)):
-            raise LaTeXParsingError('Number Error')
+            # TODO: this regex can be possibly moved to the grammar
+            raise LaTeXParsingError('NumberError: invalid number')
         s = s.replace(",", "")
         return sympy.Number(s)
     elif atom.DIFFERENTIAL():
         var = get_differential_var(atom.DIFFERENTIAL())
-        return sympy.Symbol('d' + var.name)
+        return sympy.Symbol('d' + var.name, real=LaTeXParsingContext.getOption('real_symbol'))
     elif atom.mathit():
         text = rule2text(atom.mathit().mathit_text())
-        return sympy.Symbol(text)
+        return sympy.Symbol(text, real=LaTeXParsingContext.getOption('real_symbol'))
     elif atom.angle():
         text = rule2text(atom.angle().angle_points())
         points = text.split()
@@ -685,7 +699,7 @@ def convert_atom(atom):
             else:
                 text = points[0] + ' ' + points[1] + ' ' + points[2]
         text = 'angle' + text # mark symbol as angle
-        return sympy.Symbol(text, real=True)
+        return sympy.Symbol(text, real=LaTeXParsingContext.getOption('real_symbol'))
     elif atom.frac():
         return convert_frac(atom.frac())
     elif atom.binom():
@@ -733,7 +747,7 @@ def convert_frac(frac):
             diff_op = True
 
         if diff_op or partial_op:
-            wrt = sympy.Symbol(wrt)
+            wrt = sympy.Symbol(wrt, real=LaTeXParsingContext.getOption('real_symbol'))
             if (diff_op and frac.upper.start == frac.upper.stop
                     and frac.upper.start.type == LaTeXLexer.LETTER
                     and frac.upper.start.text == 'd'):
@@ -746,14 +760,20 @@ def convert_frac(frac):
 
             expr_top = None
             if diff_op and upper_text.startswith('d'):
+                # TODO: these regex matches can be possibly moved to grammar
                 upper_text = re.sub(r'd(\^([\d]+|\{[\d]+\}))?', '', upper_text)
                 upper_text = re.sub(r'([\w])(\*?\(x\))', r'\1', upper_text)
-                expr_top = parse_latex(upper_text[1:])
+                expr_top = parse_latex(re.sub(r'd(\^[\d]+)?', '', upper_text))
             elif partial_op and frac.upper.start.text == '\\partial':
                 expr_top = parse_latex(upper_text[len('\\partial'):])
 
             if expr_top:
-                return sympy.Derivative(expr_top, wrt)
+                result = expr_top
+                for i in range(deg):
+                    result = sympy.Derivative(result, wrt)
+                    if LaTeXParsingContext.getOption('evaluate_derivative'):
+                        result = result.doit()
+                return result
     if frac.upper:
         expr_top = convert_expr(frac.upper)
     else:
@@ -762,6 +782,8 @@ def convert_frac(frac):
         expr_bot = convert_expr(frac.lower)
     else:
         expr_bot = sympy.Number(frac.lowerd.text)
+    if expr_bot == 0:
+        raise LaTeXParsingError('ZeroDivisionError: division by zero')
     inverse_denom = sympy.Pow(expr_bot, -1, evaluate=False)
     if expr_top == 1:
         return inverse_denom
@@ -784,9 +806,9 @@ def convert_ceil(ceil):
 def convert_func(func):
     if func.func_normal():
         if func.L_PAREN():  # function called with parenthesis
-            arg = convert_func_arg(func.func_arg())
+            arg = convert_func_arg(func.func_arg())[0]
         else:
-            arg = convert_func_arg(func.func_arg_noparens())
+            arg = convert_func_arg(func.func_arg_noparens())[0]
 
         name = func.func_normal().start.text[1:]
 
@@ -795,9 +817,6 @@ def convert_func(func):
                 "arcsin", "arccos", "arctan", "arccsc", "arcsec", "arccot"
         ]:
             name = "a" + name[3:]
-            expr = getattr(sympy.functions, name)(arg, evaluate=False)
-        if name in ["arsinh", "arcosh", "artanh"]:
-            name = "a" + name[2:]
             expr = getattr(sympy.functions, name)(arg, evaluate=False)
 
         if name == "exp":
@@ -811,12 +830,15 @@ def convert_func(func):
                     base = convert_atom(func.subexpr().atom())
             elif name == "lg":  # ISO 80000-2:2019
                 base = 10
-            elif name in ("ln", "log"):  # SymPy's latex printer prints ln as log by default
-                base = sympy.E
-            expr = sympy.log(arg, base, evaluate=False)
+            elif name == "log":
+                base = 10 if LaTeXParsingContext.getOption('log_base_10') else sympy.E
+            if name == "ln":
+                expr = sympy.log(arg, evaluate=False)
+            else:
+                expr = sympy.log(arg, base, evaluate=False)
 
         if (name=="exp"):
-            expr = getattr(sympy.functions, name)(arg[0], evaluate=False)
+            expr = getattr(sympy.functions, name)(arg, evaluate=False)
         func_pow = None
         should_pow = True
         if func.supexpr():
@@ -834,31 +856,31 @@ def convert_func(func):
                 name = "a" + name
                 should_pow = False
             name = name.replace("arc", "a")
-            if name in ["asin", "acos"] and arg[0].is_number and (arg[0] < -1 or 1 < arg[0]):
-                raise LaTeXParsingError('Trig Error')
-            if name in ["acsc", "asec"] and arg[0].is_number and (-1 < arg[0] and arg[0] < 1):
-                raise LaTeXParsingError('Trig Error')
-            if name in ["acosh"] and arg[0].is_number and arg[0] < 1:
-                raise LaTeXParsingError('Trig Error')
+            if name in ["asin", "acos"] and arg.is_number and (arg < -1 or 1 < arg):
+                raise LaTeXParsingError(f'TrigError: invalid argument "{arg}" for {name}')
+            if name in ["acsc", "asec"] and arg.is_number and (-1 < arg and arg < 1):
+                raise LaTeXParsingError(f'TrigError: invalid argument "{arg}" for {name}')
+            if name in ["acosh"] and arg.is_number and arg < 1:
+                raise LaTeXParsingError(f'TrigError: invalid argument "{arg}" for {name}')
             expr = getattr(sympy.functions, name)(arg, evaluate=False)
 
         if func_pow and should_pow:
             expr = sympy.Pow(expr, func_pow, evaluate=False)
 
         if name == "abs":
-            expr = sympy.Abs(arg[0], evaluate=False)
+            expr = sympy.Abs(arg, evaluate=False)
 
         if name== 'Re':
-            expr = sympy.re(arg[0], evaluate=False)
+            expr = sympy.re(arg, evaluate=False)
 
         if name == 'Im':
-            expr = sympy.im(arg[0], evaluate=False)
+            expr = sympy.im(arg, evaluate=False)
 
         if name == 'arg':
-            expr = sympy.arg(arg[0], evaluate=False)
+            expr = sympy.arg(arg, evaluate=False)
 
         if name == 'overline':
-            expr = arg[0]
+            expr = arg
 
         return expr
     elif func.LETTER() or func.SYMBOL():
@@ -976,8 +998,8 @@ def handle_matrix_determinent(matrix):
         m_list.append(convert_matrix_row(row))
     try:
         return sympy.Matrix(m_list).det()
-    except:
-        raise LaTeXParsingError('Handle Matrix Determinent')
+    except Exception as e:
+        raise LaTeXParsingError('Error handling matrix determinent') from e
 
 
 def handle_piecewise_func(piecewise_func):
@@ -986,21 +1008,21 @@ def handle_piecewise_func(piecewise_func):
         try:
             if piecewise_func.OTHERWISE():
                 return expr, 'otherwise'
-        except:
+        except Exception:
             pass
         if piecewise_func.relation() is None:
-            raise LaTeXParsingError('Piecewise Function Error')
+            raise LaTeXParsingError('PiecewiseFunctionError: invalid relation expression')
         rel = convert_relation(piecewise_func.relation())
 
-        if isinstance(rel.lhs, sympy.relational.Relational):
+        if isinstance(rel.lhs, sympy.core.relational.Relational):
             l_rel = rel.lhs
             r_rel = type(rel)(rel.lhs.rhs,rel.rhs)
             rel = sympy.And(l_rel, r_rel)
         return expr, rel
     except LaTeXParsingError:
         raise
-    except:
-        raise LaTeXParsingError('Handle Piecewise Func')
+    except Exception as e:
+        raise LaTeXParsingError('Error handling piecewise function') from e
 
 
 def handle_matrix_piecewise(matrix_piecewise):
@@ -1020,13 +1042,13 @@ def handle_matrix_piecewise(matrix_piecewise):
 
             if cond == 'otherwise':
                 if otherwise_expr is not None:
-                    raise LaTeXParsingError('Piecewise Function Error')
+                    raise LaTeXParsingError('PiecewiseFunctionError: invalid otherwise expression')
                 otherwise_expr = expr
                 continue
 
             try:
                 otherwise = cond.as_set().symmetric_difference(otherwise)
-            except:
+            except Exception:
                 pass
 
             piecewise_items.append((expr, cond))
@@ -1037,8 +1059,8 @@ def handle_matrix_piecewise(matrix_piecewise):
         return piecewise_items
     except LaTeXParsingError:
         raise
-    except:
-        raise LaTeXParsingError('Handle Matrix Piecewise')
+    except Exception as e:
+        raise LaTeXParsingError('Error handling matrix piecewise') from e
 
 
 def handle_matrix_relation(matrix_relation):
@@ -1052,8 +1074,8 @@ def handle_matrix_relation(matrix_relation):
         return relations
     except LaTeXParsingError:
         raise
-    except:
-        raise LaTeXParsingError("Error in parsing for matrix relation")
+    except Exception as e:
+        raise LaTeXParsingError("Error handling Matrix relation") from e
 
 
 def handle_piecewise(piecewise):
@@ -1065,27 +1087,14 @@ def handle_piecewise(piecewise):
             # parse expr and cond
             expr, cond = handle_piecewise_func(piecewise_func)
 
-            # check if expr domain contains cond
-            # for atom in expr.atoms(sympy.Symbol):
-            #     domain = continuous_domain(expr, atom, sympy.S.Reals)
-            #     if not cond.as_set().is_subset(domain):
-            #         raise FunctionError
-
-            # check if cond is overlapping
-            # for (p_expr, p_cond) in piecewise_items:
-            #     overlap = p_cond.as_set().intersect(cond.as_set())
-            #     # in case of overlapping, check if the function value is same for the overlapping area
-            #     if overlap and not overlap.is_subset(sympy.solveset(sympy.simplify(expr - p_expr))):
-            #         raise FunctionError
-
             piecewise_items.append((expr, cond))
 
         # return sympy.Piecewise(*piecewise_items)
         return piecewise_items
     except LaTeXParsingError:
         raise
-    except:
-        raise LaTeXParsingError("Error in Handle Piecewise")
+    except Exception as e:
+        raise LaTeXParsingError("Error handling Piecewise expression") from e
 
 
 def handle_calculation(calculation):
@@ -1099,7 +1108,7 @@ def handle_calculation(calculation):
             res = sympy.Number(ops[2].getText())
 
             if sympy.Eq(res, sympy.Add(l_op, r_op)) == False:
-                raise LaTeXParsingError('Addition Error')
+                raise LaTeXParsingError('AdditionError: False equality')
 
             return sympy.Eq(res, sympy.Add(l_op, r_op, evaluate=False), evaluate=False)
 
@@ -1110,7 +1119,7 @@ def handle_calculation(calculation):
             res = sympy.Number(ops[2].getText())
 
             if sympy.Eq(res, sympy.Add(l_op, r_op)) == False:
-                raise LaTeXParsingError('Subtraction Error')
+                raise LaTeXParsingError('SubtractionError: False equality')
 
             return sympy.Eq(res, sympy.Add(l_op, r_op, evaluate=False), evaluate=False)
 
@@ -1121,7 +1130,7 @@ def handle_calculation(calculation):
             res = sympy.Number(ops[2].getText())
 
             if sympy.Eq(res, sympy.Mul(l_op, r_op)) == False:
-                raise LaTeXParsingError('Multiplication Error')
+                raise LaTeXParsingError('MultiplicationError: False equality')
 
             return sympy.Eq(res, sympy.Mul(l_op, r_op, evaluate=False), evaluate=False)
 
@@ -1134,8 +1143,8 @@ def handle_calculation(calculation):
             return sympy.Eq(res, sympy.Mul(l_op, sympy.Pow(r_op, -1, evaluate=False), evaluate=False), evaluate=False)
     except LaTeXParsingError:
         raise
-    except:
-        raise LaTeXParsingError('Handle Calculation')
+    except Exception as e:
+        raise LaTeXParsingError('Unknown error in parsing calculation') from e
 
 
 def convert_matrix_row(row):
@@ -1158,7 +1167,7 @@ def convert_set_notation_expr(set_notation_expr):
             if isinstance(symbol, sympy.Symbol):
                 common_symbol = symbol
                 break
-    except:
+    except Exception:
         pass
 
     if set_notation_expr.SET_ADD():
@@ -1174,16 +1183,16 @@ def convert_set_notation_expr(set_notation_expr):
 
 def handle_set_notation(sub):
     if sub.LETTER():
-        var = sympy.Symbol(sub.LETTER().getText(), real=True)
+        var = sympy.Symbol(sub.LETTER().getText(), real=LaTeXParsingContext.getOption('real_symbol'))
     elif sub.SYMBOL():
-        var = sympy.Symbol(sub.SYMBOL().getText()[1:], real=True)
+        var = sympy.Symbol(sub.SYMBOL().getText()[1:], real=LaTeXParsingContext.getOption('real_symbol'))
     else:
-        var = sympy.Symbol('x', real=True)
+        var = sympy.Symbol('x', real=LaTeXParsingContext.getOption('real_symbol'))
     rel = convert_relation(sub.relation())
     sol = sympy.S.Reals
-    while isinstance(rel,sympy.relational.Relational):
+    while isinstance(rel,sympy.core.relational.Relational):
         future_rel = rel.lhs
-        if isinstance(rel.lhs,sympy.relational.Relational):
+        if isinstance(rel.lhs,sympy.core.relational.Relational):
             future_rel = rel.lhs
             rel = type(rel)(rel.lhs.rhs,rel.rhs)
 
@@ -1221,17 +1230,18 @@ def handle_interval(interval):
         or (interval.interval_opr(0).R_PAREN() and interval.interval_opr(1).R_BRACKET())
         or (interval.interval_opr(1).R_PAREN() and interval.interval_opr(0).R_BRACKET())
     ):
-        raise LaTeXParsingError('Interval Error')
+        raise LaTeXParsingError('IntervalError: invalid grouping')
 
     if (
         (left_expr == sympy.oo or left_expr == -sympy.oo) and not left_bool
     ) or (
         (right_expr == sympy.oo or right_expr == -sympy.oo) and not right_bool
     ):
-        raise LaTeXParsingError('Interval Error')
+        raise LaTeXParsingError('IntervalError: invalid use of infinity in interval')
     res = sympy.Interval(left_expr, right_expr, left_bool, right_bool)
-    if isinstance(res, sympy.EmptySet) and left_expr != right_expr:
-        raise LaTeXParsingError('Interval Error')
+    if res is sympy.EmptySet and left_expr != right_expr:
+        # TODO: why should this be a error at parser level ?
+        raise LaTeXParsingError('IntervalError: Set with different boundaries appears to be empty')
     return res
 
 def handle_integral(func):
@@ -1250,15 +1260,15 @@ def handle_integral(func):
             s = str(sym)
             if len(s) > 1 and s[0] == 'd':
                 if s[1] == '\\':
-                    int_var = sympy.Symbol(s[2:])
+                    int_var = sympy.Symbol(s[2:], real=LaTeXParsingContext.getOption('real_symbol'))
                 else:
-                    int_var = sympy.Symbol(s[1:])
+                    int_var = sympy.Symbol(s[1:], real=LaTeXParsingContext.getOption('real_symbol'))
                 int_sym = sym
         if int_var:
             integrand = integrand.subs(int_sym, 1)
         else:
             # Assume dx by default
-            int_var = sympy.Symbol('x')
+            int_var = sympy.Symbol('x', real=LaTeXParsingContext.getOption('real_symbol'))
 
     if func.subexpr():
         if func.subexpr().atom():
@@ -1269,7 +1279,11 @@ def handle_integral(func):
             upper = convert_atom(func.supexpr().atom())
         else:
             upper = convert_expr(func.supexpr().expr())
-        return sympy.Integral(integrand, (int_var, lower, upper))
+        # NOTE: doing .doit() evaluates the integral.
+        result = sympy.Integral(integrand, (int_var, lower, upper))
+        if LaTeXParsingContext.getOption('evaluate_integral'):
+            return result.doit()
+        return result
     else:
         return sympy.Integral(integrand, int_var)
 
@@ -1289,20 +1303,23 @@ def handle_iintegral(func):
             s = str(sym)
             if len(s) > 1 and s[0] == 'd':
                 if s[1] == '\\':
-                    int_vars.append(sympy.Symbol(s[2:], real=True))
+                    int_vars.append(sympy.Symbol(s[2:], real=LaTeXParsingContext.getOption('real_symbol')))
                 else:
-                    int_vars.append(sympy.Symbol(s[1:], real=True))
+                    int_vars.append(sympy.Symbol(s[1:], real=LaTeXParsingContext.getOption('real_symbol')))
                 integrand = integrand.subs(sym, 1)
         if not int_vars:
             # Assume dx by default
-            int_vars.append(sympy.Symbol('x', real=True))
+            int_vars.append(sympy.Symbol('x', real=LaTeXParsingContext.getOption('real_symbol')))
 
     if func.subexpr():
         if func.subexpr().atom():
             lower = convert_atom(func.subexpr().atom())
         else:
             lower = convert_expr(func.subexpr().expr())
-        return sympy.Integral(integrand, *int_vars, lower).doit()
+        result = sympy.Integral(integrand, *int_vars, lower)
+        if LaTeXParsingContext.getOption('evaluate_integral'):
+            return result.doit()
+        return result
     else:
         return sympy.Integral(integrand, *int_vars)
 
@@ -1322,22 +1339,25 @@ def handle_ointegral(func):
             s = str(sym)
             if len(s) > 1 and s[0] == 'd':
                 if s[1] == '\\':
-                    int_var = sympy.Symbol(s[2:], real=True)
+                    int_var = sympy.Symbol(s[2:], real=LaTeXParsingContext.getOption('real_symbol'))
                 else:
-                    int_var = sympy.Symbol(s[1:], real=True)
+                    int_var = sympy.Symbol(s[1:], real=LaTeXParsingContext.getOption('real_symbol'))
                 int_sym = sym
         if int_var:
             integrand = integrand.subs(int_sym, 1)
         else:
             # Assume dx by default
-            int_var = sympy.Symbol('x', real=True)
+            int_var = sympy.Symbol('x', real=LaTeXParsingContext.getOption('real_symbol'))
 
     if func.subexpr():
         if func.subexpr().atom():
             lower = convert_atom(func.subexpr().atom())
         else:
             lower = convert_expr(func.subexpr().expr())
-        return sympy.Integral(integrand, (int_var, lower)).doit()
+        result = sympy.Integral(integrand, (int_var, lower))
+        if LaTeXParsingContext.getOption('evaluate_integral'):
+            return result.doit()
+        return result
     else:
         return sympy.Integral(integrand, int_var)
 
@@ -1349,15 +1369,15 @@ def handle_sum_or_prod(func, name):
     else:
         for atom in val.atoms():
             if isinstance(atom, sympy.Symbol):
-                iter_var=atom
+                iter_var = atom
                 break
         else:
             iter_var = n
 
         if func.subexpr().expr():
-            start    = convert_expr(func.subexpr().expr())
+            start = convert_expr(func.subexpr().expr())
         else:
-            start    = convert_atom(func.subexpr().atom())
+            start = convert_atom(func.subexpr().atom())
 
     if func.supexpr().expr():  # ^{expr}
         end = convert_expr(func.supexpr().expr())
@@ -1365,18 +1385,24 @@ def handle_sum_or_prod(func, name):
         end = convert_atom(func.supexpr().atom())
 
     if name == "summation":
-        return sympy.Sum(val, (iter_var, start, end))
+        result = sympy.Sum(val, (iter_var, start, end))
+        if LaTeXParsingContext.getOption('evaluate_summation_op'):
+            return result.doit()
+        return result
     elif name == "product":
-        return sympy.Product(val, (iter_var, start, end))
+        result = sympy.Product(val, (iter_var, start, end))
+        if LaTeXParsingContext.getOption('evaluate_product_op'):
+            return result.doit()
+        return result
 
 def handle_limit(func):
     sub = func.limit_sub()
     if sub.LETTER():
-        var = sympy.Symbol(sub.LETTER().getText())
+        var = sympy.Symbol(sub.LETTER().getText(), real=LaTeXParsingContext.getOption('real_symbol'))
     elif sub.SYMBOL():
-        var = sympy.Symbol(sub.SYMBOL().getText()[1:])
+        var = sympy.Symbol(sub.SYMBOL().getText()[1:], real=LaTeXParsingContext.getOption('real_symbol'))
     else:
-        var = sympy.Symbol('x')
+        var = sympy.Symbol('x', real=LaTeXParsingContext.getOption('real_symbol'))
     if sub.SUB():
         direction = "-"
     elif sub.ADD():
@@ -1386,12 +1412,15 @@ def handle_limit(func):
     approaching = convert_expr(sub.expr())
     content = convert_mp(func.mp())
 
-    return sympy.Limit(content, var, approaching, direction)
+    result = sympy.Limit(content, var, approaching, direction)
+    if LaTeXParsingContext.getOption('evaluate_limit'):
+        return result.doit()
+    return result
 
 
 def get_differential_var(d):
     text = get_differential_var_str(d.getText())
-    return sympy.Symbol(text)
+    return sympy.Symbol(text, real=LaTeXParsingContext.getOption('real_symbol'))
 
 def get_multi_differential_var(d):
     diffs = multi_differential_re.findall(d.getText())

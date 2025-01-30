@@ -148,8 +148,7 @@ FUNC_ABS: '\\abs';
 FUNC_RE: '\\Re';
 FUNC_IM: '\\Im';
 FUNC_ARG: '\\arg';
-// TODO: FUNC_OVERLINE was not used in code
-// FUNC_OVERLINE: '\\overline';
+FUNC_OVERLINE: '\\overline';
 
 CMD_TIMES: '\\times';
 CMD_CDOT: '\\cdot';
@@ -409,7 +408,7 @@ func:
     (subexpr)?
     (additive? DIFFERENTIAL | frac | additive)
 	| FUNC_SQRT (L_BRACKET root = expr R_BRACKET)? L_BRACE base = expr R_BRACE
-	// | FUNC_OVERLINE L_BRACE base = expr R_BRACE
+	| FUNC_OVERLINE L_BRACE base = expr R_BRACE
   | FUNC_SUM
   (subeq supexpr | subexpr supexpr | supexpr subeq | supexpr subexpr)
   mp

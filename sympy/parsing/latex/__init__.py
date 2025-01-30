@@ -10,7 +10,7 @@ __doctest_requires__ = {('parse_latex',): ['antlr4', 'lark']}
 
 
 @doctest_depends_on(modules=('antlr4', 'lark'))
-def parse_latex(s, strict=False, backend="antlr", prefer_point_over_interval=False):
+def parse_latex(s, strict=False, backend="antlr"):
     r"""Converts the input LaTeX string ``s`` to a SymPy ``Expr``.
 
     Parameters
@@ -58,7 +58,7 @@ def parse_latex(s, strict=False, backend="antlr", prefer_point_over_interval=Fal
             import_kwargs={'fromlist': ['X']})
 
         if _latex is not None:
-            return _latex.parse_latex(s, strict, prefer_point_over_interval=False)
+            return _latex.parse_latex(s, strict)
     elif backend == "lark":
         return parse_latex_lark(s)
     else:
@@ -72,19 +72,23 @@ class LaTeXParsingContext(object):
         "is_commutative": True,
         "prefer_point_over_interval": False,
         "force_set": False,
+        "default_struct": None,
+        "real_symbol": None,
+        "log_base_10": False,
+        "evaluate_derivative": False,
+        "evaluate_integral": False,
+        "evaluate_limit": False,
+        "evaluate_summation_op": False,
+        "evaluate_product_op": False,
     }
 
     def __init__(
-        self, is_commutative=None, prefer_point_over_interval=None, force_set=None
+        self,
+        **new_options
     ):
-        new_options = {
-            "is_commutative": is_commutative,
-            "prefer_point_over_interval": prefer_point_over_interval,
-            "force_set": force_set,
-        }
         self.options = {
             **self.__class__.getOptions(),
-            **{k: v for k, v in new_options.items() if v is not None},
+            **new_options,
         }
 
     def __enter__(self):
