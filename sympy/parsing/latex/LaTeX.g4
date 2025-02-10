@@ -148,7 +148,7 @@ FUNC_ABS: '\\abs';
 FUNC_RE: '\\Re';
 FUNC_IM: '\\Im';
 FUNC_ARG: '\\arg';
-FUNC_OVERLINE: '\\overline';
+FUNC_OVERLINE: OVERLINE;
 
 CMD_TIMES: '\\times';
 CMD_CDOT: '\\cdot';
@@ -178,6 +178,8 @@ DIFFERENTIAL: 'd' WS_CHAR*? ([a-zA-Z] | '\\' [a-zA-Z]+);
 MULTI_DIFFERENTIAL: DIFFERENTIAL+;
 
 LETTER: [a-zA-Z];
+
+NUMBER: DIGIT+ (',' DIGIT DIGIT DIGIT)* ('.' DIGIT+)?;
 DIGIT: [0-9];
 
 EQUAL: (('&' WS_CHAR*?)? '=') | ('=' (WS_CHAR*? '&')?) | '=' | '\\eq';
@@ -315,10 +317,8 @@ group:
 
 abs_group: BAR expr BAR;
 
-number: DIGIT+ (',' DIGIT DIGIT DIGIT)* ('.' DIGIT+)?;
-
 atom: (LETTER | SYMBOL) (subexpr? SINGLE_QUOTES? | SINGLE_QUOTES? subexpr?)
-	| number
+	| NUMBER
 	| DIFFERENTIAL
 	| mathit
 	| frac
@@ -466,10 +466,10 @@ piecewise: piecewise_func ('\\\\' piecewise_func)*;
 matrix_piecewise_func: expr | expr (SEMI_COLON | AMP | 'if') relation | expr OTHERWISE;
 matrix_piecewise: matrix_piecewise_func ('\\\\' matrix_piecewise_func)*;
 
-calculation_add: number '\\\\' ADD number '\\\\' HLINE number;
-calculation_sub: number '\\\\' SUB number '\\\\' HLINE number;
-calculation_mul: number '\\\\' (CMD_TIMES | MUL) number '\\\\' HLINE number;
-calculation_div: number '\\\\' number L_BRACE OVERLINE L_BRACE SMASH_BIG number R_BRACE R_BRACE;
+calculation_add: NUMBER '\\\\' ADD NUMBER '\\\\' HLINE NUMBER;
+calculation_sub: NUMBER '\\\\' SUB NUMBER '\\\\' HLINE NUMBER;
+calculation_mul: NUMBER '\\\\' (CMD_TIMES | MUL) NUMBER '\\\\' HLINE NUMBER;
+calculation_div: NUMBER '\\\\' NUMBER L_BRACE OVERLINE L_BRACE SMASH_BIG NUMBER R_BRACE R_BRACE;
 calculation: calculation_add | calculation_sub | calculation_mul | calculation_div;
 
 matrix_relation: relation ('\\\\' relation)*;

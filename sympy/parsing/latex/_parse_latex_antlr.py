@@ -169,19 +169,27 @@ if ErrorListener:
             raise LaTeXParsingError(err)
 
 
-def process_sympy(parser):
+def process_sympy(source, parser, strict: bool):
         math_e = parser.math()
-        if math_e.relation():
-            return convert_relation(math_e.relation())
-        elif math_e.struct_relation():
-            return convert_struct_relation(math_e.struct_relation())
-        elif math_e.equation_list():
-            return convert_equation_list(math_e.equation_list())
+        if relation := math_e.relation():
+            if strict and (relation.start.start != 0 or relation.stop.stop != len(source) - 1):
+                raise LaTeXParsingError("Invalid LaTeX")
+            return convert_relation(relation)
+        elif struct_relation := math_e.struct_relation():
+            if strict and (struct_relation.start.start != 0 or struct_relation.stop.stop != len(source) - 1):
+                raise LaTeXParsingError("Invalid LaTeX")
+            return convert_struct_relation(struct_relation)
+        elif equation_list := math_e.equation_list():
+            if strict and (equation_list.start.start != 0 or equation_list.stop.stop != len(source) - 1):
+                raise LaTeXParsingError("Invalid LaTeX")
+            return convert_equation_list(equation_list)
         raise LaTeXParsingError("Latex2SympyError")
 
-def process_set(parser):
+def process_set(source: str, parser, strict: bool):
     try:
         struct_f = parser.struct_form()
+        if strict and (struct_f.start.start != 0 or struct_f.stop.stop != len(source) - 1):
+            raise LaTeXParsingError("Invalid LaTeX")
         expr = convert_struct_form(struct_f)
         default_struct = LaTeXParsingContext.getOption('default_struct')
         if (not isinstance(expr, Structure)):
@@ -215,7 +223,7 @@ def build_parser(input: str, matherror):
     return parser
 
 
-def parse_latex(sympy, strict=False):
+def parse_latex(source, strict=False):
     antlr4 = import_module('antlr4')
 
     if None in [antlr4, MathErrorListener] or \
@@ -224,28 +232,28 @@ def parse_latex(sympy, strict=False):
                           " provided by pip (antlr4-python3-runtime) or"
                           " conda (antlr-python-runtime), version 4.11")
 
-    sympy = sympy.strip()
-    matherror = MathErrorListener(sympy)
+    source = source.strip()
+    matherror = MathErrorListener(source)
 
-    parser = build_parser(sympy, matherror)
+    parser = build_parser(source, matherror)
 
     if LaTeXParsingContext.getOption('force_set') is True:
-        return process_set(parser)
+        return process_set(source, parser, strict)
     else:
-        if re.search(r'\d\s+\d', sympy):
+        if re.search(r'\d\s+\d', source):
             raise LaTeXParsingError('FractionError: space not allowed between digits')
         try:
             parser._interp.predictionMode = PredictionMode.SLL
-            return process_sympy(parser)
+            return process_sympy(source, parser, strict)
         except Exception:
             pass
         try:
-            parser = build_parser(sympy, matherror)
-            return process_sympy(parser)
+            parser = build_parser(source, matherror)
+            return process_sympy(source, parser, strict)
         except LaTeXParsingError:
             raise
         except Exception as e:
-            raise LaTeXParsingError(f"Error parsing '{sympy}'") from e
+            raise LaTeXParsingError(f"Error parsing '{source}'") from e
 
 def convert_struct_form(form):
     if(len(form.value()) == 1):
@@ -413,6 +421,11 @@ def convert_add(add):
                 if lh.shape != rh.shape:
                     raise LaTeXParsingError('Latex2SympyError')
                 return lh + rh
+
+            # NOTE: if either is zero, do not return "0+x" but "x"
+            # Corresponding test case: https://github.com/snapwiz/math-engine/blob/d822a2a38480971ce2041f8af12453e6808563f1/tests.csv#L13527
+            # if lh == 0: return rh
+            # if rh == 0: return lh
             return sympy.Add(lh, rh, evaluate=False)
     elif add.SUB():
         lh = convert_add(add.additive(0))
@@ -677,8 +690,8 @@ def convert_atom(atom):
             if LaTeXParsingContext.getOption('is_commutative') is False:
                 return sympy.Symbol(s, commutative=False)
             return sympy.Symbol(s, real=LaTeXParsingContext.getOption('real_symbol'))
-    elif atom.number():
-        s = atom.number().getText()
+    elif atom.NUMBER():
+        s = atom.NUMBER().getText()
         if (number_error_re.search(s)):
             # TODO: this regex can be possibly moved to the grammar
             raise LaTeXParsingError('NumberError: invalid number')
