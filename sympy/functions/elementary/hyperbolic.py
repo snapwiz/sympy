@@ -540,6 +540,10 @@ class cosh(HyperbolicFunction):
         re, im = arg.as_real_imag()
         return (im%pi).is_zero
 
+    def _eval_is_extended_real(self):
+        if self.args[0].is_extended_real:
+            return True
+
     def _eval_is_positive(self):
         # cosh(x+I*y) = cos(y)*cosh(x) + I*sin(y)*sinh(x)
         # cosh(z) is positive iff it is real and the real part is positive.
