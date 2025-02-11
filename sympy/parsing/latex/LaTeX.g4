@@ -179,7 +179,7 @@ MULTI_DIFFERENTIAL: DIFFERENTIAL+;
 
 LETTER: [a-zA-Z];
 
-NUMBER: DIGIT+ (',' DIGIT DIGIT DIGIT)* ('.' DIGIT+)?;
+NUMBER: DIGIT+ (',' DIGIT DIGIT DIGIT)* ('.' DIGIT*)? | '.' DIGIT+;
 DIGIT: [0-9];
 
 EQUAL: (('&' WS_CHAR*?)? '=') | ('=' (WS_CHAR*? '&')?) | '=' | '\\eq';
