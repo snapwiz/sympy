@@ -482,6 +482,11 @@ def convert_mp(mp):
             if lh.shape[1] != rh.shape[0]:
                 raise LaTeXParsingError('Latex2SympyError')
             return lh * rh
+
+        if lh.equals(1) is True:
+            return rh
+        if rh.equals(1) is True:
+            return lh
         return sympy.Mul(lh, rh, evaluate=False)
     elif mp.DIV() or mp.CMD_DIV() or mp.COLON():
         lh = convert_mp(mp_left)
