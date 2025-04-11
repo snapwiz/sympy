@@ -439,9 +439,9 @@ def convert_add(add):
             # Corresponding test case: https://github.com/snapwiz/math-engine/blob/d822a2a38480971ce2041f8af12453e6808563f1/tests.csv#L13527
             # if lh == 0: return rh
             # if rh == 0: return lh
-            if lh.equals(0) is True:
+            if lh == 0:
                 return rh
-            if rh.equals(0) is True:
+            if rh == 0:
                 return lh
             return sympy.Add(lh, rh, evaluate=False)
     elif add.SUB():
@@ -483,9 +483,9 @@ def convert_mp(mp):
                 raise LaTeXParsingError('Latex2SympyError')
             return lh * rh
 
-        if lh.equals(1) is True:
+        if lh == 1:
             return rh
-        if rh.equals(1) is True:
+        if rh == 1:
             return lh
         return sympy.Mul(lh, rh, evaluate=False)
     elif mp.DIV() or mp.CMD_DIV() or mp.COLON():
