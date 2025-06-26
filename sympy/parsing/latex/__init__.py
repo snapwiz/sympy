@@ -63,4 +63,50 @@ def parse_latex(s, strict=False, backend="antlr"):
         return parse_latex_lark(s)
     else:
         raise NotImplementedError(f"Using the '{backend}' backend in the LaTeX" \
-                                   " parser is not supported.")
+                                  " parser is not supported.")
+
+
+class LaTeXParsingContext(object):
+    _context_stack = []
+    DEFAULT_OPTIONS = {
+        "is_commutative": True,
+        "prefer_point_over_interval": False,
+        "force_set": False,
+        "default_struct": None,
+        "real_symbol": None,
+        "log_base_10": False,
+        "evaluate_derivative": False,
+        "evaluate_integral": False,
+        "evaluate_limit": False,
+        "evaluate_summation_op": False,
+        "evaluate_product_op": False,
+    }
+
+    def __init__(
+        self,
+        **new_options
+    ):
+        self.options = {
+            **self.__class__.getOptions(),
+            **new_options,
+        }
+
+    def __enter__(self):
+        self.__class__._context_stack.append(self)
+
+    def __exit__(self, type, value, traceback):
+        assert len(self.__class__._context_stack) > 0, (
+            "UnReachable Code: Context __exit__ called more times than Context __enter__"
+        )
+        self.__class__._context_stack.pop()
+
+    @classmethod
+    def getOptions(cls):
+        if cls._context_stack:
+            return cls._context_stack[-1].options
+        else:
+            return cls.DEFAULT_OPTIONS
+
+    @classmethod
+    def getOption(cls, optionName):
+        return cls.getOptions()[optionName]
